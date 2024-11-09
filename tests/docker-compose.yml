@@ -1,0 +1,56 @@
+
+services:
+  rabbitmq:
+    image: rabbitmq:management  # RabbitMQ with the management interface
+    container_name: 'rabbitmq'
+    ports:
+      - "5672:5672"  # RabbitMQ port for communication
+      - "15672:15672"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 5s
+
+  perform_ocr:
+    deploy:
+      replicas: 2
+    build:
+      context: ../perform_ocr
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+    networks:
+      - app-network
+
+  faulty_ocr:
+    build:
+      context: ../faulty_ocr
+    container_name: 'faulty_ocr'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+    networks:
+      - app-network
+
+  pii_filter:
+    build:
+      context: ../pii_filter
+    container_name: 'pii_filter'
+    depends_on:
+      - perform_ocr  # Ensure perform_ocr starts before pii_filter
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
