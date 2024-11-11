@@ -41,9 +41,10 @@ services:
       - app-network
 
   pii_filter:
+    deploy:
+      replicas: 2
     build:
       context: ../pii_filter
-    container_name: 'pii_filter'
     depends_on:
       - perform_ocr  # Ensure perform_ocr starts before pii_filter
     environment:

@@ -5,9 +5,7 @@ import pika
 import pytest
 from uuid import uuid4
 from pathlib import Path
-# from .async_publisher import RMQPublisher
 from .sync_publisher import RMQPublisher
-
 
 
 @pytest.fixture(scope="session")
@@ -49,33 +47,37 @@ def test_ocr_pipeline(compose):
             ocr_in_messages.append((uuid, img_data))
             pii_in_messages.append((uuid, json.dumps(ppi_list)))
             reference[uuid] = ref_list
-    print('Test data ready to publish')
-    # publish messages
+    # declare publishers
     ocr_publisher = RMQPublisher(compose)
     pii_publisher = RMQPublisher(compose, exchange='pii', exchange_type='fanout')
-    pii_publisher.publish_messages(queue="pii_in", messages=pii_in_messages)
+    # declare consumer
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host="127.0.0.1", port=5672))
+    channel = connection.channel()
+    channel.exchange_declare(exchange='pii_out', exchange_type='fanout')
+    queue_name = channel.queue_declare(queue="", durable=True, exclusive=True).method.queue
+    channel.queue_bind(exchange='pii_out', queue=queue_name)
+    results = 0
+
+    def callback(ch, method, properties, body):
+        nonlocal results
+        results += 1
+        pii_out = [x['text'] for x in json.loads(body.decode())]
+        match = 'OK' if set(reference[properties.correlation_id]) == set(pii_out) else 'MISMATCH'
+
+        print(f'Received [{results}/{len(reference)}] {properties.correlation_id=} {match}:\n\t{pii_out}')
+
+        if results >= len(reference):
+            channel.stop_consuming()
+            connection.close()
+
+    channel.basic_consume(queue=queue_name, on_message_callback=callback, auto_ack=True)
+
+    print('Test data ready to publish')
+    pii_publisher.publish_messages(queue="", messages=pii_in_messages)
     print('Done publishing to pii_in')
     ocr_publisher.publish_messages(queue="ocr_in", messages=ocr_in_messages)
     print('Done publishing to ocr_in')
 
-    # consumer
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=ip, port=port))
-    channel = connection.channel()
-    channel.queue_declare(queue="pii_out", durable=True)
-
     print('Starting consume loop')
-    results = 0
-    for method, properties, body in channel.consume(queue="pii_out", auto_ack=True):
-        pii_out = [x['text'] for x in json.loads(body.decode())]
-        print(f'Received {pii_out=} ...')
-        if set(reference[properties.correlation_id]) == set(pii_out):
-            print('... as expected')
-        else:
-            print(f'... but was expecting to receive:\n{reference[properties.correlation_id]}')
+    channel.start_consuming()
 
-        results += 1
-        if results > len(data):
-            break
-
-    channel.cancel()
-    connection.close()

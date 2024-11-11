@@ -8,7 +8,7 @@ LOG_FORMAT = ('%(levelname) -10s %(asctime)s %(name) -30s %(funcName) '
               '-35s %(lineno) -5d: %(message)s')
 log = logging.getLogger(__name__)
 
-logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 
 
 class RMQPublisher:
@@ -35,6 +35,7 @@ class RMQPublisher:
             routing_key=routing_key,
             body=message,
             properties=properties)
+        log.info(f'Published {correlation_id}')
 
     def publish_messages(self, queue: str, messages: list):
         self.connect()
